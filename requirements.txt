@@ -1,0 +1,13 @@
+streamlit
+pandas
+numpy
+plotly
+google-generativeai
+python-dotenv
+reportlab
+matplotlib
+seaborn
+pyarrow
+requests
+scikit-learn
+openpyxl

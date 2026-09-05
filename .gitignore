@@ -1,0 +1,5 @@
+.env
+__pycache__
+*.pyc
+Listings.csv
+online_retail_II.csv
