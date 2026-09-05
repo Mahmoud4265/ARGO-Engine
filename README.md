@@ -1,7 +1,7 @@
 <div align="center">
 
   # ⚡ ARGO Engine
-  ### *Automated Executive EDA, Data Quality Assessment & AI Insights Platform*
+  ### *Automated Reported & Generative oprtimizer*
 
   [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
   [![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white)](https://streamlit.io/)
