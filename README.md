@@ -1,7 +1,7 @@
 <div align="center">
 
   # ⚡ ARGO Engine
-  ### *Automated Reporting & Generative oprtimizer*
+  ### *Automated Reporting & Generative optimizer*
 
   [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
   [![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white)](https://streamlit.io/)
@@ -11,7 +11,7 @@
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
   <p align="center">
-    <b>ARGO Engine</b> is an end-to-end, high-performance Data Analytics & Quality Assessment Engine built to bridge the gap between heavy, manual Exploratory Data Analysis (EDA) and executive decision-making. Powered by <code>PyArrow</code> vectorization and <code>Google Gemini AI</code>, it processes large-scale datasets instantly and outputs polished executive PDF reports.
+    <b>ARGO Engine</b> is an end-to-end, high-performance data analytics and quality assessment engine built to bridge the gap between heavy, manual Exploratory Data Analysis (EDA) and executive decision-making. Powered by <code>PyArrow</code> vectorization and <code>Google Gemini AI</code>, it processes large-scale datasets instantly and outputs polished executive PDF reports.
   </p>
 
   <a href="#-quick-start--local-installation"><b>Explore Installation</b></a> •
