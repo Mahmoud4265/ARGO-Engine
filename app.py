@@ -11,9 +11,11 @@ from eda_engine import (
     recommend_cleaning_strategy,
     generate_sklearn_pipeline_code,
     apply_auto_fix,
-    generate_pdf_report,
     generate_eda_report,
-    get_plottable_columns
+    get_plottable_columns,
+    _call_gemini,
+    _parse_ai_json,
+    _response_was_truncated
 )
 import plotly.express as px
 from dotenv import load_dotenv
@@ -21,6 +23,7 @@ import numpy as np
 import requests
 import json
 import re
+import google.generativeai as genai
 from pdf_generator import generate_executive_pdf
 
 load_dotenv()
@@ -68,7 +71,8 @@ uploaded_file = st.sidebar.file_uploader("Upload Dataset", type=["csv", "xlsx", 
 
 if uploaded_file is not None:
     df, error = load_data_cached(uploaded_file)
-    st.session_state.df = df
+    if df is not None:
+        st.session_state.df = df
 
     if error:
         st.error(f"❌ {error}")
@@ -77,11 +81,15 @@ if uploaded_file is not None:
 
         
         file_id = f"{uploaded_file.name}_{uploaded_file.size}"
-        report = run_analysis(df, top_n=top_n, _file_id=file_id) 
-        if report not in st.session_state:
+        report_key = f"analysis_report_{file_id}_{top_n}"
+
+        if report_key not in st.session_state:
             with st.spinner("Analyzing dataset health and detecting underlying issues..."):
-                st.session_state[report] = run_analysis(df, top_n=top_n, _file_id=file_id)
-                report = st.session_state[report]
+                st.session_state[report_key] = run_analysis(
+                    df, top_n=top_n, _file_id=file_id
+                )
+
+        report = st.session_state[report_key]
 
         summary = report["dataset_summary"]
         col1, col2, col3, col4 = st.columns(4)
@@ -219,12 +227,13 @@ if uploaded_file is not None:
                 df = st.session_state.df
 
                 drawable_cols = get_plottable_columns(df)
+                selected_col = None
                 if not drawable_cols:
                     st.warning("There are no columns for visualization (All columns are IDs)")
                 else:
                     selected_col = st.selectbox("Select a column to visualize:", drawable_cols)
 
-                if selected_col:
+                if selected_col is not None:
                     import matplotlib.pyplot as plt
 
                     
@@ -476,7 +485,7 @@ if uploaded_file is not None:
             st.markdown("### 💡 AI Feature Engineering & Pipeline Generator")
             st.write("Generate high-impact feature interactions and export them as a production-ready Scikit-Learn Pipeline.")
 
-            df_fe = st.session_state.get('cleaned_df', df).copy()
+            df_fe = st.session_state.get('cleaned_df', st.session_state.df).copy()
 
             col_fe1, col_fe2 = st.columns([1, 1])
 
@@ -486,9 +495,10 @@ if uploaded_file is not None:
                 possible_date_cols = [c for c in datetime_cols if 'date' in c.lower() or 'time' in c.lower()]
                 if not possible_date_cols:
                     st.warning("⚠️ No column containing 'date' or 'time' was found. Please select carefully — all displayed columns are plain text and may not represent actual dates.")
-                selected_date_col = st.selectbox("Select Date Column:", possible_date_cols if possible_date_cols else datetime_cols)
+                date_options = possible_date_cols if possible_date_cols else datetime_cols
+                selected_date_col = st.selectbox("Select Date Column:", date_options) if date_options else None
 
-                if st.button("Extract Date Parts"):
+                if st.button("Extract Date Parts", disabled=not date_options):
                     try:
                         temp_date = pd.to_datetime(df_fe[selected_date_col], errors='coerce')
                         df_fe[f"{selected_date_col}_year"]      = temp_date.dt.year
@@ -535,94 +545,192 @@ if uploaded_file is not None:
                 if not api_key:
                     st.warning("Please enter your Gemini API Key in the sidebar.")
                 else:
-                    with st.spinner("⚡ AI is analyzing feature interactions and building Sklearn Pipeline..."):
-                        try:
-                            import google.generativeai as genai
-                            import json, re
+                    numeric_ai_cols = df_fe.select_dtypes(include=[np.number]).columns.tolist()[:12]
 
-                            genai.configure(api_key=api_key)
-
-                            generation_config = genai.GenerationConfig(max_output_tokens=600, temperature=0.1)
-                            model = genai.GenerativeModel('gemini-3.6-flash', generation_config=generation_config)
-
-                            num_cols_for_ai = df_fe.select_dtypes(include=[np.number]).columns.tolist()[:12]
-
-                            fe_prompt = f"""
-You are a Principal Data Scientist. Given these numeric columns:
-{num_cols_for_ai}
-
-Return ONLY a valid JSON array (no markdown, no explanation) with exactly 2 objects.
-Each object must have these keys:
-  "feature_name"   : string  – snake_case name for the new feature
-  "col_a"          : string  – must be one of the columns listed above
-  "col_b"          : string  – must be one of the columns listed above (different from col_a)
-  "operation"      : string  – one of: "multiply", "divide", "add", "subtract"
-  "accuracy_boost" : string  – estimated boost e.g. "~3%"
-  "reason"         : string  – one sentence explanation
-
-Example format:
-[
-  {{"feature_name":"revenue_per_unit","col_a":"revenue","col_b":"units","operation":"divide","accuracy_boost":"~4%","reason":"Captures efficiency ratio."}},
-  {{"feature_name":"age_x_income","col_a":"age","col_b":"income","operation":"multiply","accuracy_boost":"~2%","reason":"Interaction term boosts tree splits."}}
-]
-"""
-                            raw_response = model.generate_content(fe_prompt).text.strip()
-
-                            json_match = re.search(r'\[.*\]', raw_response, re.DOTALL)
-                            if not json_match:
-                                raise ValueError(f"AI did not return valid JSON.\nRaw response:\n{raw_response}")
-
-                            suggestions = json.loads(json_match.group())
-
-                            valid_suggestions = []
-                            for s in suggestions:
-                                if s["col_a"] in df_fe.columns and s["col_b"] in df_fe.columns:
-                                    valid_suggestions.append(s)
-                                else:
-                                    st.warning(f"⚠️ Skipped suggestion '{s.get('feature_name')}' — column not found in dataframe.")
-
-                            if not valid_suggestions:
-                                raise ValueError("No valid suggestions after column validation.")
-
-                            st.session_state["ai_feature_suggestions"] = valid_suggestions
-
-                            st.markdown("### 🚀 Recommended Interactions:")
-                            ops_symbol = {"multiply": "×", "divide": "÷", "add": "+", "subtract": "−"}
-                            for i, s in enumerate(valid_suggestions, 1):
-                                symbol = ops_symbol.get(s["operation"], s["operation"])
-                                st.markdown(
-                                    f"**{i}. `{s['feature_name']}`** → "
-                                    f"`{s['col_a']}` {symbol} `{s['col_b']}` | "
-                                    f"Expected Boost: **{s['accuracy_boost']}** | "
-                                    f"_{s['reason']}_"
+                    if len(numeric_ai_cols) < 2:
+                        st.warning("⚠️ AI feature engineering needs at least 2 numeric columns.")
+                    else:
+                        with st.spinner("⚡ AI is analyzing feature interactions and building Sklearn Pipeline..."):
+                            try:
+                                genai.configure(api_key=api_key)
+                                generation_config = genai.GenerationConfig(
+                                    temperature=0.1,
+                                    max_output_tokens=2048,
+                                    response_mime_type="application/json"
+                                )
+                                model = genai.GenerativeModel(
+                                    'gemini-3.6-flash',
+                                    generation_config=generation_config
                                 )
 
-                            transform_lines = []
-                            for s in valid_suggestions:
-                                col_a, col_b, op, fname = s["col_a"], s["col_b"], s["operation"], s["feature_name"]
-                                if   op == "multiply": expr = f"X_out['{col_a}'] * X_out['{col_b}']"
-                                elif op == "divide":   expr = f"X_out['{col_a}'] / X_out['{col_b}'].replace(0, np.nan)"
-                                elif op == "add":      expr = f"X_out['{col_a}'] + X_out['{col_b}']"
-                                elif op == "subtract": expr = f"X_out['{col_a}'] - X_out['{col_b}']"
-                                else:                  expr = f"X_out['{col_a}'] + X_out['{col_b}']"
-                                transform_lines.append(f"        X_out['{fname}'] = {expr}")
+                                # The previous version used 600 tokens plus a regex that required
+                                # a closing ']'. A truncated Gemini response therefore became an
+                                # invalid-JSON error. Use native JSON mode + robust parsing instead.
+                                fe_prompt = f"""
+You are a Principal Data Scientist. Given these numeric columns:
+{numeric_ai_cols}
 
-                            transform_block = "\n".join(transform_lines)
+Return ONLY a valid JSON array with 1 or 2 objects.
+Each object MUST contain exactly these keys:
+- feature_name: snake_case string
+- col_a: string, must be one of the columns listed above
+- col_b: string, must be one of the columns listed above and different from col_a
+- operation: one of multiply, divide, add, subtract
+- accuracy_boost: short string such as ~3% (do not claim certainty)
+- reason: one short sentence
 
-                            pipeline_code = f"""import numpy as np
+Rules:
+1. Use only literal column names from the list.
+2. Never use a column with itself.
+3. Keep every reason short.
+4. Do not include markdown, code fences, or any text outside the JSON array.
+"""
+
+                                response = _call_gemini(
+                                    model,
+                                    fe_prompt,
+                                    temperature=0.1,
+                                    max_output_tokens=2048,
+                                    want_json=True
+                                )
+
+                                raw_response = (getattr(response, "text", "") or "").strip()
+                                if not raw_response:
+                                    raise ValueError("The AI model returned an empty response.")
+
+                                suggestions = _parse_ai_json(raw_response)
+                                if not isinstance(suggestions, list):
+                                    raise ValueError("AI response was not a JSON array.")
+
+                                valid_suggestions = []
+                                allowed_ops = {"multiply", "divide", "add", "subtract"}
+                                required_keys = {
+                                    "feature_name", "col_a", "col_b",
+                                    "operation", "accuracy_boost", "reason"
+                                }
+
+                                for item in suggestions[:2]:
+                                    if not isinstance(item, dict):
+                                        continue
+
+                                    missing = required_keys - set(item.keys())
+                                    if missing:
+                                        st.warning(
+                                            "⚠️ Skipped an AI suggestion because it is missing: "
+                                            + ", ".join(sorted(missing)) + "."
+                                        )
+                                        continue
+
+                                    col_a = item.get("col_a")
+                                    col_b = item.get("col_b")
+                                    operation = str(item.get("operation", "")).strip().lower()
+
+                                    if col_a not in df_fe.columns or col_b not in df_fe.columns:
+                                        st.warning(
+                                            f"⚠️ Skipped suggestion '{item.get('feature_name')}' — "
+                                            "one or more columns were not found in the dataframe."
+                                        )
+                                        continue
+
+                                    if col_a == col_b:
+                                        st.warning(
+                                            f"⚠️ Skipped suggestion '{item.get('feature_name')}' — "
+                                            "col_a and col_b must be different."
+                                        )
+                                        continue
+
+                                    if operation not in allowed_ops:
+                                        st.warning(
+                                            f"⚠️ Skipped suggestion '{item.get('feature_name')}' — "
+                                            f"unsupported operation '{operation}'."
+                                        )
+                                        continue
+
+                                    item = {
+                                        "feature_name": str(item["feature_name"]).strip(),
+                                        "col_a": str(col_a),
+                                        "col_b": str(col_b),
+                                        "operation": operation,
+                                        "accuracy_boost": str(item["accuracy_boost"]).strip(),
+                                        "reason": str(item["reason"]).strip(),
+                                    }
+
+                                    if item["feature_name"]:
+                                        valid_suggestions.append(item)
+
+                                if not valid_suggestions:
+                                    raise ValueError(
+                                        "No valid AI feature suggestions remained after validation."
+                                    )
+
+                                st.session_state["ai_feature_suggestions"] = valid_suggestions
+
+                                if _response_was_truncated(response):
+                                    st.warning(
+                                        "⚠️ Gemini reached its output limit. The completed suggestions "
+                                        "were recovered; run the analysis again if you want another set."
+                                    )
+
+                                st.markdown("### 🚀 Recommended Interactions:")
+                                ops_symbol = {
+                                    "multiply": "×",
+                                    "divide": "÷",
+                                    "add": "+",
+                                    "subtract": "−"
+                                }
+
+                                for i, suggestion in enumerate(valid_suggestions, 1):
+                                    symbol = ops_symbol[suggestion["operation"]]
+                                    st.markdown(
+                                        f"**{i}. `{suggestion['feature_name']}`** → "
+                                        f"`{suggestion['col_a']}` {symbol} `{suggestion['col_b']}` | "
+                                        f"Expected Boost: **{suggestion['accuracy_boost']}** | "
+                                        f"_{suggestion['reason']}_"
+                                    )
+
+                                transform_lines = []
+                                for suggestion in valid_suggestions:
+                                    col_a = suggestion["col_a"]
+                                    col_b = suggestion["col_b"]
+                                    op = suggestion["operation"]
+                                    fname = suggestion["feature_name"]
+
+                                    if op == "multiply":
+                                        expr = f"X_out[{col_a!r}] * X_out[{col_b!r}]"
+                                    elif op == "divide":
+                                        expr = f"X_out[{col_a!r}] / X_out[{col_b!r}].replace(0, np.nan)"
+                                    elif op == "add":
+                                        expr = f"X_out[{col_a!r}] + X_out[{col_b!r}]"
+                                    else:
+                                        expr = f"X_out[{col_a!r}] - X_out[{col_b!r}]"
+
+                                    transform_lines.append(
+                                        f"        X_out[{fname!r}] = {expr}"
+                                    )
+
+                                transform_block = "\n".join(transform_lines)
+                                suggestion_comments = "\n".join(
+                                    f"      - {x['feature_name']}: {x['col_a']} {x['operation']} "
+                                    f"{x['col_b']} ({x['reason']})"
+                                    for x in valid_suggestions
+                                )
+
+                                pipeline_code = f'''import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+
 
 class ARGOEngineFeatureBuilder(BaseEstimator, TransformerMixin):
-    \"\"\"
-    Custom Scikit-Learn Transformer generated by ARGO Engine ML Copilot.
-    Features engineered by AI based on actual column analysis.
-    Suggested interactions:
-{chr(10).join(f"      - {s['feature_name']}: {s['col_a']} {s['operation']} {s['col_b']} ({s['reason']})" for s in valid_suggestions)}
-    \"\"\"
+    """
+    Custom Scikit-Learn transformer generated by ARGO Engine ML Copilot.
+
+    AI-selected feature interactions:
+{suggestion_comments}
+    """
+
     def __init__(self):
         pass
 
@@ -632,29 +740,33 @@ class ARGOEngineFeatureBuilder(BaseEstimator, TransformerMixin):
     def transform(self, X):
         X_out = X.copy()
 
-        # ── AI-Selected Feature Interactions (Real Columns) ──────────────────
+        # AI-selected feature interactions
 {transform_block}
 
         return X_out
 
-# ── Production-Ready Sklearn Pipeline ────────────────────────────────────────
+
 ARGO_pipeline = Pipeline([
-    ('feature_builder', ARGOEngineFeatureBuilder()),
-    ('imputer',         SimpleImputer(strategy='median')),
-    ('scaler',          StandardScaler()),
+    ("feature_builder", ARGOEngineFeatureBuilder()),
+    ("imputer", SimpleImputer(strategy="median")),
+    ("scaler", StandardScaler()),
 ])
 
+
 if __name__ == "__main__":
-    print("✅ Engine Sklearn Pipeline loaded successfully!")
+    print("✅ ARGO Engine Scikit-Learn pipeline loaded successfully!")
     # Example:
     # X_transformed = ARGO_pipeline.fit_transform(raw_df)
-"""
-                            st.session_state["ai_pipeline_code"] = pipeline_code
+'''
 
-                        except json.JSONDecodeError as e:
-                            st.error(f"❌ Failed to parse AI response as JSON: {e}\n\nRaw response:\n{raw_response}")
-                        except Exception as e:
-                            st.error(f"❌ Error: {e}")
+                                st.session_state["ai_pipeline_code"] = pipeline_code
+
+                            except json.JSONDecodeError as e:
+                                st.session_state["ai_feature_suggestions"] = None
+                                st.session_state["ai_pipeline_code"] = None
+                                st.error(f"❌ Failed to parse AI response as JSON: {e}")
+                            except Exception as e:
+                                st.error(f"❌ Error: {e}")
 
             if st.session_state.get("ai_feature_suggestions"):
                 st.markdown("---")
