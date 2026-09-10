@@ -69,27 +69,25 @@ Data Scientists and Engineers spend up to **80% of their time** performing repet
 ### 1. Interactive Exploratory Data Analysis & Feature Distributions
 *Dynamic Boxplots, Histograms, and Correlation Heatmaps built for instant statistical profiling.*
 
-<img src="assets/Capture4.PNG" alt="Feature Distributions" width="100%" />
+<img src="assests/Capture4.PNG" alt="Feature Distributions" width="100%" />
 <br/><br/>
-<img src="assets/Capture3.PNG" alt="Correlation Heatmap" width="100%" />
+<img src="assests/Capture3.PNG" alt="Correlation Heatmap" width="100%" />
 
 ---
 
 ### 2. Automated Executive PDF Report Generation
 *Production-grade vectorized PDF export summarizing dataset health, metrics, and quality issues.*
 
-<img src="assets/Capture7.PNG" alt="Executive PDF Report" width="100%" />
+<img src="assests/Capture7.PNG" alt="Executive PDF Report" width="100%" />
 
 ---
 
 ### 3. Production-Ready Scikit-Learn Pipeline Code
 *AI-generated Python pipelines featuring custom feature builders, imputation, and scaling.*
 
-<img src="assets/Capture6.PNG" alt="Scikit-Learn Pipeline Code" width="100%" />
+<img src="assests/Capture6.PNG" alt="Scikit-Learn Pipeline Code" width="100%" />
 
 </div>
-
----
 
 ## 🛠️ Architecture & Tech Stack
 
